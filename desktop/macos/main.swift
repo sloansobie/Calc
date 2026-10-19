@@ -151,6 +151,10 @@ final class CalculatorDelegate: NSObject, NSApplicationDelegate, WKScriptMessage
         window.level = .floating
         window.hidesOnDeactivate = false
         window.collectionBehavior = [.managed, .fullScreenPrimary, .canJoinAllApplications]
+        if let saved = UserDefaults.standard.string(forKey: sessionKey), let data = saved.data(using: .utf8),
+           let session = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            applyWindowSettings(session["settings"] as? [String: Any] ?? [:])
+        }
         window.setFrameAutosaveName("ScientificCalculatorWindow")
         if !window.setFrameUsingName("ScientificCalculatorWindow") { window.center() }
         if !UserDefaults.standard.bool(forKey: "calculator.compactWindow.v2") {
@@ -216,6 +220,7 @@ final class CalculatorDelegate: NSObject, NSApplicationDelegate, WKScriptMessage
            let data = value.data(using: .utf8), let session = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            session["rows"] is [Any] {
             UserDefaults.standard.set(value, forKey: sessionKey)
+            applyWindowSettings(session["settings"] as? [String: Any] ?? [:])
             saveWorksheetFiles(session)
         } else if action == "rename", let id = body["id"] as? String, let name = body["name"] as? String,
                   let path = worksheetPaths[id] {
@@ -236,6 +241,13 @@ final class CalculatorDelegate: NSObject, NSApplicationDelegate, WKScriptMessage
             UserDefaults.standard.set(String(value.prefix(12000)), forKey: "calculator.lastFrontendError")
             NSLog("Calculator frontend error: %@", value)
         }
+    }
+
+    private func applyWindowSettings(_ settings: [String: Any]) {
+        window.level = (settings["stayOnTop"] as? Bool ?? true) ? .floating : .normal
+        var behavior: NSWindow.CollectionBehavior = [.managed, .fullScreenPrimary, .canJoinAllApplications]
+        if settings["followDesktops"] as? Bool == true { behavior.insert(.canJoinAllSpaces) }
+        window.collectionBehavior = behavior
     }
 
     private var worksheetDirectory: URL {

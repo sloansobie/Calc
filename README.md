@@ -56,3 +56,22 @@ Native worksheets are saved in `~/Documents/Calc Worksheets/`, with session reco
 Calculations retain JavaScript number precision. Workers are interrupted on edits or after a time limit. Symbolic calculus uses radians; numerical trigonometry follows RAD/DEG. Symbolic simplification may omit restrictions at singular points. This is an independent implementation inspired by Desmos, without accounts, graphing, or cloud sync.
 
 Third-party font licenses are included in `public/fonts/`.
+
+### Multiplication and variable names
+
+Adjacent values multiply: `2ab` means `2*a*b`, `a(b+c)` means
+`a*(b+c)` when `a` is a variable, and `(a+b)(c+d)` multiplies the groups.
+Declared function names remain calls, including forward references. Built-ins
+and explicitly declared multi-letter names stay whole: with `ab=5`, `2ab` is
+`2*ab`; otherwise `ab` means `a*b`. Undeclared letter runs are split into
+single-letter variables, so an undefined-name error identifies the first missing
+letter. Subscripted names such as `a_{1}` remain single variables.
+
+Implicit products use the same precedence as explicit `*`: `2ab^2` means
+`2*a*(b^2)`, `-a^2` means `-(a^2)`, and `8/2a` means `(8/2)*a`.
+Use parentheses or the fraction template to group a denominator.
+
+Greek variables work as Unicode (`ζ`) or LaTeX (`\zeta`). Keyboard asterisks
+exported by the editor as `\ast` are accepted alongside `\times`, `\cdot`,
+and ordinary `*`. For `sqrt((1+(2*ζ*r)^2)/(1-r^2)^2)`, define both `ζ` and `r`;
+the expression is undefined at `r=1` and `r=-1`.

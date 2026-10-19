@@ -25,6 +25,8 @@ const defaults: Settings = {
   complex: true,
   keyboard: false,
   significantFigures: 12,
+  stayOnTop: true,
+  followDesktops: false,
 };
 const newRow = (): Row => ({ id: crypto.randomUUID(), latex: "" });
 type Worksheet = { id: string; name: string; rows: Row[] };
@@ -636,6 +638,16 @@ export default function App() {
                       {Array.from({ length: 15 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n}</option>)}
                     </select>
                   </label>
+                  {(window as Window & { calculatorBrowse?: () => void }).calculatorBrowse && <>
+                    <label className="window-option"><span>Stay on top</span>
+                      <input type="checkbox" role="switch" checked={settings.stayOnTop !== false}
+                        onChange={(event) => setSettings({ ...settings, stayOnTop: event.target.checked })} />
+                    </label>
+                    <label className="window-option"><span>Follow across desktops</span>
+                      <input type="checkbox" role="switch" checked={settings.followDesktops === true}
+                        onChange={(event) => setSettings({ ...settings, followDesktops: event.target.checked })} />
+                    </label>
+                  </>}
                   <button className="options-help" onClick={() => { setOptionsOpen(false); setHelp(true); }}>
                     <CircleHelp size={16} /> Help & features
                   </button>
@@ -730,7 +742,11 @@ export default function App() {
             </p>
             <p className="help-note">
               Type Greek names (alpha, ALPHA) for symbols, or a letter followed by
-              digits for subscripts. Type sqrt, sum, integral, or derivative for math
+              digits for subscripts. Type _ to enter a letter
+              subscript, then Right Arrow to return to normal typing. For example,
+              type S, _, su, Right Arrow for S with subscript su.
+              Type log(...) for base-ten logarithms.
+              Type sqrt, sum, integral, or derivative for math
               templates. Repeated apostrophes create higher derivatives. General
               derivatives and supported antiderivatives return formulas; definite
               integrals and derivative templates at a point use numerical evaluation.

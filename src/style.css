@@ -1889,3 +1889,19 @@ math-field {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .worksheet-controls .worksheet-title:hover { background: #ffffff09; }
+.window-option { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 12px; color: #eceef4; font-size: 12px; }
+.window-option input { appearance: none; width: 28px; height: 17px; border-radius: 12px; background: #ffffff20; position: relative; cursor: pointer; margin: 0; flex-shrink: 0; transition: background 150ms; }
+.window-option input::after { content: ''; position: absolute; width: 13px; height: 13px; top: 2px; left: 2px; border-radius: 50%; background: #e5e8ed; transition: transform 150ms; }
+.window-option input:checked { background: #648be0; }
+.window-option input:checked::after { transform: translateX(11px); }
+.window-option input:focus-visible { outline: 1px solid #a7c3ff; outline-offset: 3px; }
+
+/* Keep previous-answer references recognizable in both calculator themes. */
+math-field {
+  --ans-token-color: #315ea8;
+  --ans-token-background: #e8eef8;
+}
+.contrast math-field {
+  --ans-token-color: #c3d8ff;
+  --ans-token-background: #35445e;
+}

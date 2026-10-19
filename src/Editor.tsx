@@ -55,11 +55,13 @@ export function Editor({
 }: Props) {
   const host = useRef<HTMLDivElement>(null),
     field = useRef<MathfieldElement | null>(null);
+  const answerObserver = useRef<MutationObserver | null>(null);
   const callbacks = useRef({ onChange, onFocus, onEnter, onNavigate });
   const lastRestoreToken = useRef(restoreToken);
   callbacks.current = { onChange, onFocus, onEnter, onNavigate };
   useLayoutEffect(() => {
     function mount(value: string) {
+      answerObserver.current?.disconnect();
       const mf = new MathfieldElement();
       let numbered:
         | { start: number; end: number; base: string; digits: string }
@@ -89,6 +91,22 @@ export function Editor({
       mf.addEventListener(
         "keydown",
         (event: KeyboardEvent) => {
+          if (event.key === "(" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            numbered = undefined;
+            primes = undefined;
+            mf.insert("\\left(#0\\right)", { selectionMode: "placeholder" });
+            return;
+          }
+          if (event.key === "_" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            numbered = undefined;
+            primes = undefined;
+            mf.executeCommand("moveToSubscript");
+            return;
+          }
           if ((event.key === ")" || event.key === "]") &&
               !event.metaKey && !event.ctrlKey &&
               mf.selection.ranges.every(([a, b]) => a === b)) {
@@ -213,7 +231,27 @@ export function Editor({
         font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif !important;
         font-style: normal !important;
       }`;
+      typography.textContent += `
+        .ML__op-group[data-previous-answer] {
+          color: var(--ans-token-color, #315ea8);
+          background: var(--ans-token-background, #e8eef8);
+          border-radius: 0.18em;
+          box-shadow: 0 0 0 0.08em var(--ans-token-background, #e8eef8);
+        }
+      `;
       mf.shadowRoot?.append(typography);
+      // Decorate the rendered operator without rewriting LaTeX or moving the caret.
+      // MathLive replaces these nodes as the expression is edited.
+      const highlightAnswer = () => {
+        mf.shadowRoot?.querySelectorAll(".ML__op-group").forEach((operator) => {
+          operator.toggleAttribute("data-previous-answer", operator.textContent?.trim() === "ans");
+        });
+      };
+      if (mf.shadowRoot) {
+        answerObserver.current = new MutationObserver(highlightAnswer);
+        answerObserver.current.observe(mf.shadowRoot, { childList: true, subtree: true, characterData: true });
+        highlightAnswer();
+      }
       mf.inlineShortcuts = scientificShortcuts;
       mf.onInlineShortcut = (_sender, candidate) => {
         const beforeCursor = mf.getValue(0, mf.position);
@@ -232,6 +270,7 @@ export function Editor({
     mount(latex);
     return () => {
       register(id, null);
+      answerObserver.current?.disconnect();
       field.current?.remove();
     };
   }, [id]);

@@ -70,6 +70,11 @@ describe("mathematical notation and scientific calculations", () => {
       "Complete the expression",
     );
   });
+  it("evaluates adjacent variables with letter subscripts in a logarithm", () => {
+    const results = run(["f=2", "S_{su}=10", String.raw`b=-\frac{1}{3}\log\left(\frac{fS_{su}}{14.46}\right)`]);
+    expect(results["2"].error).toBeUndefined();
+    expect(Number(results["2"].text)).toBeCloseTo(-Math.log10(20 / 14.46) / 3, 10);
+  });
   it("supports complex mode and rejects nonreal answers by default", () => {
     expect(value("\\sqrt{-1}").error).toMatch(/complex mode/);
     expect(value("\\sqrt{-1}", { complex: true }).text).toBe("i");
@@ -80,7 +85,7 @@ describe("mathematical notation and scientific calculations", () => {
   it("reports incomplete and invalid input", () => {
     expect(value("\\frac{1}{}").error).toMatch(/Complete/);
     expect(value("1/0").error).toBe("Result is undefined");
-    expect(value("missing+1").error).toBe("Undefined name: missing");
+    expect(value("q+1").error).toBe("Undefined name: q");
     expect(value("stdev([1])").error).toBeTruthy();
   });
   it("allows only calculator expression types", () => {
@@ -256,4 +261,68 @@ it('rounds displayed results without rounding dependent calculations', () => {
   const results = evaluateWorksheet(rows, { angle: 'rad', large: false, contrast: true, complex: true, significantFigures: 3 });
   expect(results['0'].text).toBe('0.333');
   expect(results['1'].text).toBe('1');
+});
+
+describe("implicit multiplication and the damping expression", () => {
+  it.each([
+    ["2ab", "12"], ["2a", "4"], ["a(b+c)", "14"],
+    ["(a+b)(c+d)", "45"], ["2ab^2", "36"], ["-2a^2", "-8"],
+    ["2^-a", "0.25"], ["2^3^2", "512"], ["2ζr", "0.2"],
+    ["2a_{1}b", "42"], ["2e-3a", "0.004"], ["8/2a", "8"],
+  ])("evaluates %s as %s", (expression, expected) => {
+    const result = run([expression, "a=2", "b=3", "c=4", "d=5", "ζ=0.1", "r=1", "a_{1}=7"])["0"];
+    expect(result).toEqual({ text: expected, definition: false });
+  });
+  it("preserves declared names, function calls and local parameters", () => {
+    const result = run(["2speed+f(3)+2ab", "speed=4", "f(time)=2time", "ab=5"]);
+    expect(result["0"].text).toBe("24");
+    expect(run(["f(x)=2xy", "y=3", "f(4)"])["2"].text).toBe("24");
+    expect(run(["2a(b+1)", "a=3", "b=4"])["0"].text).toBe("30");
+    expect(run(["2sin(30)"])["0"].text).toBe("1");
+  });
+  it.each([
+    "sqrt((1 + (2 * ζ * r)^2) / (1 - r^2)^2)",
+    String.raw`\sqrt{\frac{1+(2\cdot\zeta\cdot r)^2}{(1-r^2)^2}}`,
+    String.raw`\sqrt{\frac{1+(2\ast\zeta\ast r)^2}{(1-r^2)^2}}`,
+    String.raw`\sqrt{\frac{1+(2ζr)^2}{(1-r^2)^2}}`,
+  ])("evaluates screenshot notation %s", expression => {
+    const result = run([expression, "ζ=0.1", "r=0.5"])["0"];
+    expect(result.error).toBeUndefined();
+    expect(Number(result.text)).toBeCloseTo(Math.sqrt(1.01 / 0.75 ** 2), 10);
+    expect(run([expression, "ζ=0.1", "r=1"])["0"].error).toBe("Result is undefined");
+    expect(run([expression])["0"].error).toBe("Undefined name: ζ");
+  });
+  it("normalizes products in calculus bodies and retains dependency errors", () => {
+    expect(run([String.raw`\sum_{n=1}^{3}\left(2an\right)`, "a=2"])["0"].text).toBe("24");
+    expect(run(["2ab", "a=2"])["0"].error).toBe("Undefined name: b");
+    expect(run(["2ab", "a=b", "b=a"])["0"].error).toBe("Circular dependency");
+    expect(run(["2ab", "a=2", "a=3", "b=4"])["0"].error).toBe("Duplicate definition: a");
+  });
+});
+
+it("rejects malformed numeric literals instead of multiplying their fragments", () => {
+  expect(value("1.2.3").error).toBeTruthy();
+  expect(value("2 3").error).toBeTruthy();
+  expect(value("2e-3").text).toBe("0.002");
+});
+
+
+describe("adjacent declared identifiers", () => {
+  it.each(["C = 2ζmw", String.raw`C = 2\zeta mw`])("evaluates %s", (expression) => {
+    const result = run([expression, "ζ=0.1", "m=3", "w=4", "C+1"]);
+    expect(result["0"].error).toBeUndefined();
+    expect(Number(result["0"].text)).toBeCloseTo(2.4);
+    expect(Number(result["4"].text)).toBeCloseTo(3.4);
+  });
+  it("keeps declared names whole inside a product", () => {
+    expect(run(["2ζmw", "ζ=0.1", "mw=5"])["0"].text).toBe("1");
+    expect(run(["2speedx", "speed=4", "x=3"])["0"].text).toBe("24");
+    expect(run(["2ab", "ab=5", "a=2", "b=3"])["0"].text).toBe("10");
+  });
+  it("preserves adjacent built-in and declared function names", () => {
+    expect(run(["2asin(0.5)", "a=3"])["0"].text).toBe("60");
+    expect(run(["2xsin(30)", "x=3"])["0"].text).toBe("3");
+    expect(run(["2again(3)", "a=2", "gain(time)=2time"])["0"].text).toBe("24");
+    expect(run(["gain(time)=2timex", "x=3", "gain(4)"])["2"].text).toBe("24");
+  });
 });

@@ -1,6 +1,7 @@
 import { all, create, type MathNode } from "mathjs";
 import nerdamer from "nerdamer/all.js";
 import { normalizeGreek } from "./greek";
+import { implicitProducts } from "./implicit";
 export interface Row {
   id: string;
   latex: string;
@@ -12,6 +13,8 @@ export interface Settings {
   complex: boolean;
   keyboard?: boolean;
   significantFigures?: number;
+  stayOnTop?: boolean;
+  followDesktops?: boolean;
 }
 export interface Result {
   text?: string;
@@ -150,8 +153,9 @@ export function fromLatex(input: string): string {
     .replace(/\\right\|/g, ")")
     .replace(/\\(?:left|right|displaystyle|textstyle)\b/g, "")
     .replace(/\\[,;! ]/g, " ")
-    .replace(/_\{([a-zA-Z0-9]+)\}/g, "_$1")
-    .replace(/\\(?:cdot|times)/g, "*")
+    .replace(/_\{([a-zA-Z0-9]+)\}/g, "_$1 ")
+    .replace(/\\(?:cdot|times|ast)(?![a-zA-Z])/g, "*")
+    .replace(/[×·∗]/g, "*")
     .replace(/\\div/g, "/")
     .replace(/\\pi/g, " pi ")
     .replace(/\\%/g, "%")
@@ -335,6 +339,29 @@ export function evaluateWorksheet(
   rows: Row[],
   settings: Settings,
 ): Record<string, Result> {
+  // Collect declarations before normalizing any row, including forward references.
+  const identifiers = new Set(builtins);
+  identifiers.add("primeDerivative");
+  const functions = new Set([...identifiers].filter(name => !["pi", "e", "i", "ans"].includes(name)));
+  const sources = rows.map(row => {
+    try { return fromLatex(row.latex); } catch { return undefined; }
+  });
+  for (const source of sources) {
+    if (!source) continue;
+    const declaration = source.match(/^\s*([\p{L}_][\p{L}\p{N}_]*)\s*(?:\(([^()]*)\))?\s*=/u);
+    if (!declaration) continue;
+    identifiers.add(declaration[1]);
+    if (declaration[2] !== undefined) functions.add(declaration[1]);
+  }
+  function normalize(source: string): string {
+    const localNames = new Set(identifiers);
+    const parameters = source.match(/^\s*[\p{L}_][\p{L}\p{N}_]*\s*\(([^()]*)\)\s*=/u)?.[1];
+    parameters?.split(",").forEach(name => localNames.add(name.trim()));
+    // Template bodies are strings; normalize them too, leaving variable labels intact.
+    source = source.replace(/\b(calcSum|calcIntegral|calcDerivative|symbolicDerivative|symbolicIntegral|symbolicExpression)\(("(?:\\.|[^"\\])*")/g,
+      (_, name, body) => `${name}(${JSON.stringify(normalize(JSON.parse(body)))}`);
+    return implicitProducts(source, localNames, functions);
+  }
   const scope = new Map<string, any>();
   const trig = ["sin", "cos", "tan"] as const;
   trig.forEach((name) =>
@@ -484,7 +511,7 @@ export function evaluateWorksheet(
   rows.forEach((row, index) => {
     if (!row.latex.trim()) return;
     try {
-      const node = math.parse(fromLatex(row.latex));
+      const node = math.parse(normalize(sources[index] ?? fromLatex(row.latex)));
       checkAst(node);
       nodes[index] = node;
       if (

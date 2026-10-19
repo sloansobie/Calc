@@ -26,6 +26,7 @@ vi.mock("mathlive", () => {
     setValue(value: string) {
       this.value = value;
     }
+    insert = vi.fn();
   }
   customElements.define("test-math-field", MathfieldElement);
   return { MathfieldElement };
@@ -140,6 +141,27 @@ describe("safe native editor handoff", () => {
 });
 
 describe("input presentation and symbol shortcuts", () => {
+  it("inserts a closing parenthesis immediately and keeps typing inside", async () => {
+    const { field } = await setup();
+    const event = new KeyboardEvent("keydown", {
+      key: "(", shiftKey: true, bubbles: true, cancelable: true,
+    });
+    await act(() => { field.dispatchEvent(event); });
+    expect(event.defaultPrevented).toBe(true);
+    expect((field as typeof field & { insert: ReturnType<typeof vi.fn> }).insert)
+      .toHaveBeenCalledWith("\\left(#0\\right)", { selectionMode: "placeholder" });
+  });
+  it("enters a subscript with underscore without submitting the row", async () => {
+    const { field, onEnter } = await setup();
+    const command = vi.spyOn(field as typeof field & { executeCommand: (name: string) => void }, "executeCommand");
+    const event = new KeyboardEvent("keydown", {
+      key: "_", code: "Minus", shiftKey: true, bubbles: true, cancelable: true,
+    });
+    await act(() => { field.dispatchEvent(event); });
+    expect(event.defaultPrevented).toBe(true);
+    expect(command).toHaveBeenCalledWith("moveToSubscript");
+    expect(onEnter).not.toHaveBeenCalled();
+  });
   it("uses upright text and the output font with Greek shortcuts", async () => {
     const { field } = await setup();
     const editor = field as typeof field & {
@@ -414,5 +436,21 @@ it("Enter inserts below an upper row and preserves the rows beneath it", async (
     HTMLElement.prototype.scrollIntoView = scroll;
     vi.unstubAllGlobals();
     localStorage.clear();
+  }
+});
+
+it("passes Greek products and MathLive asterisks unchanged to evaluation", async () => {
+  const { evaluateWorksheet } = await import("./engine");
+  const { field, onChange } = await setup();
+  for (const latex of ["2ab", String.raw`\sqrt{\frac{1+(2\ast\zeta\ast r)^2}{(1-r^2)^2}}`]) {
+    field.value = latex;
+    await act(() => { field.dispatchEvent(new Event("input", { bubbles: true })); });
+    expect(onChange).toHaveBeenLastCalledWith(latex);
+    const results = evaluateWorksheet(
+      [latex, "a=2", "b=3", "ζ=0.1", "r=0.5"].map((latex, i) => ({ id: String(i), latex })),
+      { angle: "rad", large: false, contrast: false, complex: false },
+    );
+    expect(results["0"].error).toBeUndefined();
+    expect(Number(results["0"].text)).toBeCloseTo(latex === "2ab" ? 12 : Math.sqrt(1.01 / 0.75 ** 2), 10);
   }
 });
