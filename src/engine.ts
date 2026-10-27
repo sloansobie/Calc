@@ -13,6 +13,8 @@ export interface Settings {
   complex: boolean;
   keyboard?: boolean;
   significantFigures?: number;
+  roundingMode?: "significant" | "decimal";
+  decimalPlaces?: number;
   stayOnTop?: boolean;
   followDesktops?: boolean;
 }
@@ -23,6 +25,12 @@ export interface Result {
   latex?: string;
 }
 const math = create(all, { number: "number", predictable: false });
+
+function formatResult(value: Parameters<typeof math.format>[0], settings: Settings) {
+  return math.format(value, settings.roundingMode === "decimal"
+    ? { notation: "fixed", precision: settings.decimalPlaces ?? 2 }
+    : { precision: settings.significantFigures || 12 });
+}
 
 const calculusNames = new Set([
   "calcSum",
@@ -511,14 +519,45 @@ export function evaluateWorksheet(
   rows.forEach((row, index) => {
     if (!row.latex.trim()) return;
     try {
-      const node = math.parse(normalize(sources[index] ?? fromLatex(row.latex)));
+      let node = math.parse(normalize(sources[index] ?? fromLatex(row.latex)));
       checkAst(node);
+      // f(x) may use x as an indexed input family: x_1, x_2, … .
+      // A bare x keeps its usual scalar meaning; explicit parameter lists win.
+      if (node.type === "FunctionAssignmentNode") {
+        const definition = node as any;
+        if (definition.params.length === 1) {
+          const parameter = definition.params[0];
+          let scalar = false;
+          let dimension = 0;
+          definition.expr.traverse((child: MathNode) => {
+            if (child.type !== "SymbolNode") return;
+            const name = (child as any).name as string;
+            if (name === parameter) scalar = true;
+            if (name.startsWith(`${parameter}_`)) {
+              const suffix = name.slice(parameter.length + 1);
+              if (/^[1-9]\d*$/.test(suffix))
+                dimension = Math.max(dimension, Number(suffix));
+            }
+          });
+          if (!scalar && dimension) {
+            if (dimension > 100)
+              throw new Error("Indexed functions support at most 100 inputs");
+            node = new math.FunctionAssignmentNode(
+              definition.name,
+              Array.from({ length: dimension }, (_, i) => `${parameter}_${i + 1}`),
+              definition.expr,
+            );
+          }
+        }
+      }
       nodes[index] = node;
       if (
         node.type === "AssignmentNode" ||
         node.type === "FunctionAssignmentNode"
       ) {
         const name = (node as any).name;
+        if (name === "i")
+          throw new Error("You can’t use i as a variable: it’s reserved for the imaginary unit (√−1). Choose another letter.");
         if (builtins.has(name)) throw new Error(`“${name}” is reserved`);
         names.set(name, [...(names.get(name) || []), index]);
       }
@@ -652,7 +691,7 @@ export function evaluateWorksheet(
           const resultNode = math.parse(answer.text());
           checkAst(resultNode);
           const value = resultNode.compile().evaluate(local);
-          results[rows[index].id] = { text: math.format(value, { precision: settings.significantFigures || 12 }) };
+          results[rows[index].id] = { text: formatResult(value, settings) };
           values.set(index, value);
           state.set(index, "done");
           return value;
@@ -729,7 +768,7 @@ export function evaluateWorksheet(
       results[rows[index].id] = {
         text: definition
           ? "Defined"
-          : math.format(value, { precision: settings.significantFigures || 12 }).replace(/\*/g, "·"),
+          : formatResult(value, settings).replace(/\*/g, "·"),
         definition,
       };
       values.set(index, value);

@@ -59,6 +59,13 @@ Third-party font licenses are included in `public/fonts/`.
 
 ### Multiplication and variable names
 
+Functions accept multiple inputs: `f(x_1, x_2) = x_1^3 - 3x_1 + x_2`,
+then `f(2, 3)` gives `5`. The shorthand `f(x) = x_1^3 - 3x_1 + x_2`
+also works: when the formula uses indexed inputs without a bare `x`, inputs
+are ordered from `x_1` through the highest index (up to 100). Unused positions
+still need an argument. Explicit parameter lists and formulas using bare `x`
+retain their usual meaning.
+
 Adjacent values multiply: `2ab` means `2*a*b`, `a(b+c)` means
 `a*(b+c)` when `a` is a variable, and `(a+b)(c+d)` multiplies the groups.
 Declared function names remain calls, including forward references. Built-ins
@@ -75,3 +82,5 @@ Greek variables work as Unicode (`ζ`) or LaTeX (`\zeta`). Keyboard asterisks
 exported by the editor as `\ast` are accepted alongside `\times`, `\cdot`,
 and ordinary `*`. For `sqrt((1+(2*ζ*r)^2)/(1-r^2)^2)`, define both `ζ` and `r`;
 the expression is undefined at `r=1` and `r=-1`.
+
+Press **Command + Option + C** to bring Calc forward from any app while Calc is running. Closing its window keeps the shortcut available; use **Command + Q** to quit.

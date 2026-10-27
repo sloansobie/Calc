@@ -141,15 +141,16 @@ describe("safe native editor handoff", () => {
 });
 
 describe("input presentation and symbol shortcuts", () => {
-  it("inserts a closing parenthesis immediately and keeps typing inside", async () => {
+  it.each(["(", ")", "[", "]"])("leaves %s to normal typing without adding matching brackets", async (key) => {
     const { field } = await setup();
     const event = new KeyboardEvent("keydown", {
-      key: "(", shiftKey: true, bubbles: true, cancelable: true,
+      key, bubbles: true, cancelable: true,
     });
     await act(() => { field.dispatchEvent(event); });
-    expect(event.defaultPrevented).toBe(true);
+    expect((field as typeof field & { smartFence: boolean }).smartFence).toBe(false);
+    expect(event.defaultPrevented).toBe(false);
     expect((field as typeof field & { insert: ReturnType<typeof vi.fn> }).insert)
-      .toHaveBeenCalledWith("\\left(#0\\right)", { selectionMode: "placeholder" });
+      .not.toHaveBeenCalled();
   });
   it("enters a subscript with underscore without submitting the row", async () => {
     const { field, onEnter } = await setup();
@@ -452,5 +453,53 @@ it("passes Greek products and MathLive asterisks unchanged to evaluation", async
     );
     expect(results["0"].error).toBeUndefined();
     expect(Number(results["0"].text)).toBeCloseTo(latex === "2ab" ? 12 : Math.sqrt(1.01 / 0.75 ** 2), 10);
+  }
+});
+
+it.each(["keyboard", "keypad"])("%s Backspace removes an empty middle row and supports undo", async (input) => {
+  vi.stubGlobal("Worker", class {
+    postMessage() {}
+    terminate() {}
+  });
+  const scroll = HTMLElement.prototype.scrollIntoView;
+  HTMLElement.prototype.scrollIntoView = () => {};
+  const rows = [
+    { id: "first", latex: "1" },
+    { id: "empty", latex: "" },
+    { id: "last", latex: "2" },
+  ];
+  localStorage.setItem("scientific-session", JSON.stringify({
+    rows, settings: { angle: "deg", keyboard: false },
+  }));
+  const { default: App } = await import("./App");
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  try {
+    await act(() => root!.render(<App />));
+    const field = container.querySelectorAll("test-math-field")[1];
+    await act(() => { field.dispatchEvent(new Event("focus")); });
+    await act(async () => {
+      if (input === "keyboard") {
+        field.dispatchEvent(new KeyboardEvent("keydown", {
+          key: "Backspace", bubbles: true, cancelable: true,
+        }));
+        expect(field.isConnected).toBe(true);
+      } else {
+        container!.querySelector<HTMLButtonElement>('button[aria-label="Backspace"]')!.click();
+      }
+    });
+    expect(JSON.parse(localStorage.getItem("scientific-session")!).rows).toEqual([rows[0], rows[2]]);
+    expect((container.querySelector("test-math-field") as HTMLElement & { position: number }).position).toBe(-1);
+    await act(() => { window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "z", ctrlKey: true, bubbles: true, cancelable: true,
+    })); });
+    expect(JSON.parse(localStorage.getItem("scientific-session")!).rows).toEqual(rows);
+  } finally {
+    await act(() => root!.unmount());
+    root = undefined;
+    HTMLElement.prototype.scrollIntoView = scroll;
+    vi.unstubAllGlobals();
+    localStorage.clear();
   }
 });

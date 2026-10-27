@@ -35,6 +35,7 @@ interface Props {
   onChange: (value: string) => void;
   onFocus: () => void;
   onEnter: () => void;
+  onBackspaceEmpty?: () => void;
   onNavigate: (direction: number) => void;
   register: (
     id: string,
@@ -50,15 +51,16 @@ export function Editor({
   onChange,
   onFocus,
   onEnter,
+  onBackspaceEmpty,
   onNavigate,
   register,
 }: Props) {
   const host = useRef<HTMLDivElement>(null),
     field = useRef<MathfieldElement | null>(null);
   const answerObserver = useRef<MutationObserver | null>(null);
-  const callbacks = useRef({ onChange, onFocus, onEnter, onNavigate });
+  const callbacks = useRef({ onChange, onFocus, onEnter, onBackspaceEmpty, onNavigate });
   const lastRestoreToken = useRef(restoreToken);
-  callbacks.current = { onChange, onFocus, onEnter, onNavigate };
+  callbacks.current = { onChange, onFocus, onEnter, onBackspaceEmpty, onNavigate };
   useLayoutEffect(() => {
     function mount(value: string) {
       answerObserver.current?.disconnect();
@@ -69,7 +71,8 @@ export function Editor({
       let primes: { start: number; end: number; base: string; count: number } | undefined;
       field.current = mf;
       mf.mathVirtualKeyboardPolicy = "manual";
-      mf.smartFence = true;
+      mf.smartFence = false;
+      mf.smartSuperscript = false;
       mf.letterShapeStyle = "upright";
       mf.setAttribute("aria-label", `Expression ${index + 1}`);
       const normalized = flattenPrimes(numberedVariables(value));
@@ -91,12 +94,15 @@ export function Editor({
       mf.addEventListener(
         "keydown",
         (event: KeyboardEvent) => {
-          if (event.key === "(" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+          if (event.key === "Backspace" && !mf.value.trim() &&
+              !event.metaKey && !event.ctrlKey && !event.altKey) {
             event.preventDefault();
             event.stopImmediatePropagation();
-            numbered = undefined;
-            primes = undefined;
-            mf.insert("\\left(#0\\right)", { selectionMode: "placeholder" });
+            // Let the native key event finish before removing its focused field.
+            queueMicrotask(() => {
+              if (host.current?.isConnected && field.current === mf && !mf.value.trim())
+                callbacks.current.onBackspaceEmpty?.();
+            });
             return;
           }
           if (event.key === "_" && !event.ctrlKey && !event.metaKey && !event.altKey) {
@@ -106,24 +112,6 @@ export function Editor({
             primes = undefined;
             mf.executeCommand("moveToSubscript");
             return;
-          }
-          if ((event.key === ")" || event.key === "]") &&
-              !event.metaKey && !event.ctrlKey &&
-              mf.selection.ranges.every(([a, b]) => a === b)) {
-            const position = mf.position;
-            const prefix = mf.getValue(0, position);
-            const opening = event.key === ")" ? "(" : "[";
-            const balance = [...prefix].reduce((count, char) =>
-              count + (char === opening ? 1 : char === event.key ? -1 : 0), 0);
-            if (prefix.trim() && balance === 0) {
-              event.preventDefault();
-              event.stopImmediatePropagation();
-              mf.selection = { ranges: [[0, position]] };
-              mf.insert(`\\left${opening}${prefix}\\right${event.key}`, { selectionMode: "after" });
-              primes = undefined;
-              numbered = undefined;
-              return;
-            }
           }
           if (event.key === "'" && !event.metaKey && !event.ctrlKey &&
               mf.selection.ranges.every(([a, b]) => a === b)) {
@@ -232,11 +220,18 @@ export function Editor({
         font-style: normal !important;
       }`;
       typography.textContent += `
+        .ML__frac-line {
+          position: relative;
+          z-index: 1;
+          min-height: 1px;
+        }
+        .ML__frac-line::after {
+          min-height: 1px;
+          background: currentColor;
+        }
+
         .ML__op-group[data-previous-answer] {
-          color: var(--ans-token-color, #315ea8);
-          background: var(--ans-token-background, #e8eef8);
-          border-radius: 0.18em;
-          box-shadow: 0 0 0 0.08em var(--ans-token-background, #e8eef8);
+          color: var(--ans-token-color, #858990);
         }
       `;
       mf.shadowRoot?.append(typography);

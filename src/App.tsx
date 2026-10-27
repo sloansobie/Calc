@@ -11,6 +11,8 @@ import {
   Keyboard,
   Settings2,
   CircleHelp,
+  ChevronUp,
+  ChevronDown,
 } from "lucide-react";
 import { convertLatexToMarkup, type MathfieldElement } from "mathlive";
 import { Editor } from "./Editor";
@@ -25,6 +27,8 @@ const defaults: Settings = {
   complex: true,
   keyboard: false,
   significantFigures: 12,
+  roundingMode: "significant",
+  decimalPlaces: 2,
   stayOnTop: true,
   followDesktops: false,
 };
@@ -92,6 +96,18 @@ export default function App() {
   const [initial] = useState(load),
     [rows, setRows] = useState(initial.rows),
     [settings, setSettings] = useState(initial.settings);
+  const precisionKey = settings.roundingMode === "decimal" ? "decimalPlaces" : "significantFigures";
+  const precisionValue = settings[precisionKey] ?? (precisionKey === "decimalPlaces" ? 2 : 12);
+  const precisionMinimum = precisionKey === "decimalPlaces" ? 0 : 1;
+  const precisionLabel = precisionKey === "decimalPlaces" ? "decimal places" : "significant figures";
+  function stepPrecision(delta: number) {
+    setSettings(current => {
+      const key = current.roundingMode === "decimal" ? "decimalPlaces" : "significantFigures";
+      const minimum = key === "decimalPlaces" ? 0 : 1;
+      const value = current[key] ?? (key === "decimalPlaces" ? 2 : 12);
+      return { ...current, [key]: Math.max(minimum, Math.min(15, value + delta)) };
+    });
+  }
   const [worksheets, setWorksheets] = useState(initial.worksheets);
   const [worksheetId, setWorksheetId] = useState(initial.worksheetId);
   const [renaming, setRenaming] = useState(false);
@@ -147,7 +163,7 @@ export default function App() {
     [tab, setTab] = useState<"main" | "abc" | "func">("main"),
     [shift, setShift] = useState(false);
   const [results, setResults] = useState<Record<string, Result>>({}),
-    [busy, setBusy] = useState(false),
+    [, setBusy] = useState(false),
     [help, setHelp] = useState(false);
   const fields = useRef(new Map<string, MathfieldElement>()),
     currentRows = useRef(initial.rows),
@@ -291,7 +307,8 @@ export default function App() {
   }, [rows, settings, worksheets, worksheetId]);
   useEffect(
     () => startEvaluation(rows, settings, setResults, setBusy),
-    [rows, settings.angle, settings.complex],
+    [rows, settings.angle, settings.complex, settings.roundingMode,
+      settings.decimalPlaces, settings.significantFigures],
   );
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -361,6 +378,10 @@ export default function App() {
     }
     const mf = fields.current.get(active);
     if (!mf) return;
+    if (a.command === "delete" && !mf.value.trim()) {
+      removeEmpty(active);
+      return;
+    }
     focusMathfield(mf);
     if (a.command)
       mf.executeCommand(
@@ -379,6 +400,19 @@ export default function App() {
       setActive(row.id);
       commit([row]);
     });
+  }
+  function removeEmpty(id: string) {
+    const snapshot = currentRows.current;
+    const index = snapshot.findIndex((row) => row.id === id);
+    if (index < 0 || snapshot.length === 1 || fields.current.get(id)?.value.trim()) return;
+    const target = snapshot[index > 0 ? index - 1 : 1].id;
+    flushSync(() => {
+      setActive(target);
+      commit(snapshot.filter((row) => row.id !== id));
+    });
+    const field = fields.current.get(target);
+    if (field) field.position = -1;
+    focusMathfield(field);
   }
   function remove(id: string) {
     const snapshot = currentRows.current;
@@ -522,6 +556,7 @@ export default function App() {
                     }}
                     onFocus={() => setActive(row.id)}
                     onEnter={() => add(row.id)}
+                    onBackspaceEmpty={() => removeEmpty(row.id)}
                     onNavigate={(d) => {
                       const next = rows[index + d];
                       if (next) focus(next.id);
@@ -631,13 +666,26 @@ export default function App() {
                 <button className="options-dismiss" aria-label="Close calculator options" onClick={() => setOptionsOpen(false)} />
                 <div className="options-popover" role="region" aria-label="Calculator options"
                   onKeyDown={(event) => { if (event.key === "Escape") setOptionsOpen(false); }}>
-                  <label className="precision-control">
-                    <span>Significant figures</span>
-                    <select aria-label="Significant figures" value={settings.significantFigures || 12}
-                      onChange={(event) => setSettings({ ...settings, significantFigures: Number(event.target.value) })}>
-                      {Array.from({ length: 15 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n}</option>)}
-                    </select>
-                  </label>
+                  <div className="rounding-control">
+                  <div className="rounding-mode" data-mode={settings.roundingMode ?? "significant"} role="group" aria-label="Rounding mode">
+                    {(["significant", "decimal"] as const).map((mode) => (
+                      <button key={mode}
+                        aria-pressed={(settings.roundingMode ?? "significant") === mode}
+                        onClick={() => setSettings({ ...settings, roundingMode: mode })}>
+                        {mode === "significant" ? "Sig figs" : "Decimal places"}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="precision-stepper" role="group" aria-label={precisionLabel}>
+                    <output aria-live="polite" aria-label={precisionLabel}>{precisionValue}</output>
+                    <div className="precision-arrows">
+                      <button aria-label={`Increase ${precisionLabel}`} disabled={precisionValue >= 15}
+                        onClick={() => stepPrecision(1)}><ChevronUp size={12} /></button>
+                      <button aria-label={`Decrease ${precisionLabel}`} disabled={precisionValue <= precisionMinimum}
+                        onClick={() => stepPrecision(-1)}><ChevronDown size={12} /></button>
+                    </div>
+                  </div>
+                  </div>
                   {(window as Window & { calculatorBrowse?: () => void }).calculatorBrowse && <>
                     <label className="window-option"><span>Stay on top</span>
                       <input type="checkbox" role="switch" checked={settings.stayOnTop !== false}
@@ -684,10 +732,7 @@ export default function App() {
             <Keypad tab={tab} shift={shift} onAction={action} />
           )}
         </section>
-        <div className="under-calculator">
-          <span className={`status-dot ${busy ? "working" : ""}`} />
-          <span>{busy ? "Calculating…" : "Saved on this device"}</span>
-        </div>
+
       </main>
       <footer>
         <span>Made for working things out.</span>
@@ -729,10 +774,16 @@ export default function App() {
               <code>a = 5</code>
               <code>f(x) = x² + a</code>
               <code>f(3)</code>
+              <code>g(x₁, x₂) = x₁³ − 3x₁ + x₂</code>
+              <code>g(2, 3)</code>
               <code>mean([2, 4, 6])</code>
               <code>f′(x), f′′(x), f′(x=5)</code>
               <code>f(x) / f′(x)</code>
             </div>
+            <p className="help-note">
+              Multivariable functions accept comma-separated inputs. You can also
+              write g(x) using x₁, x₂, … in its formula, then call g(2, 3).
+            </p>
             <p className="help-note">
               Use arithmetic, fractions, roots, powers, percentages, logarithms,
               trig functions, factorials, permutations, combinations, lists, mean,
@@ -753,7 +804,7 @@ export default function App() {
             </p>
             <p className="help-note">
               Click a result to copy it. Keyboard mode hides the keypad. Options let
-              you choose 1–15 displayed significant figures without reducing calculation
+              you choose 1–15 significant figures or 0–15 decimal places for displayed results without reducing calculation
               precision. Rename, create, and switch worksheets above; everything saves
               locally and works offline.
             </p>

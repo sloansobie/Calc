@@ -13,6 +13,30 @@ const run = (inputs: string[], options: Partial<Settings> = {}) =>
   );
 const value = (input: string, options: Partial<Settings> = {}) =>
   run([input], options)["0"];
+describe("multivariable functions", () => {
+  it("supports explicit subscripted parameters and forward calls", () => {
+    const result = run(["f(2,3)", "f(x_{1},x_{2})=x_{1}^3-3x_{1}+x_{2}"]);
+    expect(result["0"].text).toBe("5");
+    expect(result["1"].definition).toBe(true);
+  });
+  it("infers indexed inputs from a single input family", () => {
+    const result = run(["f(x)=x_{1}^3-3x_{1}+x_{2}", "f(2,3)", "f(2)"]);
+    expect(result["0"].definition).toBe(true);
+    expect(result["1"].text).toBe("5");
+    expect(result["2"].error).toBeTruthy();
+  });
+  it("orders inputs by index and retains unused positions", () => {
+    expect(run(["g(t)=t_3-t_1", "g(2,99,7)"])["1"].text).toBe("5");
+  });
+  it("keeps explicit parameters and scalar inputs scoped normally", () => {
+    expect(run(["x_1=5", "f(x)=x+x_1", "f(2)"])["2"].text).toBe("7");
+    expect(run(["x_2=5", "f(x_1)=x_1+x_2", "f(2)"])["2"].text).toBe("7");
+  });
+  it("composes indexed functions with worksheet dependencies", () => {
+    const result = run(["h(a,b)=f(a,b)*c", "f(x)=x_1+x_2", "c=2", "h(3,4)"]);
+    expect(result["3"].text).toBe("14");
+  });
+});
 describe("mathematical notation and scientific calculations", () => {
   it.each([
     ["2+3*4", "14"],
@@ -324,5 +348,24 @@ describe("adjacent declared identifiers", () => {
     expect(run(["2xsin(30)", "x=3"])["0"].text).toBe("3");
     expect(run(["2again(3)", "a=2", "gain(time)=2time"])["0"].text).toBe("24");
     expect(run(["gain(time)=2timex", "x=3", "gain(4)"])["2"].text).toBe("24");
+  });
+});
+
+it("explains why i cannot be assigned and preserves the imaginary unit", () => {
+  const results = run(["i=5", "i^2"], { complex: true });
+  expect(results["0"].error).toContain("You can’t use i as a variable");
+  expect(results["0"].error).toContain("imaginary unit");
+  expect(results["1"].text).toBe("-1");
+});
+
+describe("decimal place display", () => {
+  it("defaults to two decimal places and retains precision for dependent calculations", () => {
+    const results = run(["a=1/3", "a*3", "1234.567", "-1.237", "0.001"], { roundingMode: "decimal" });
+    expect(Object.values(results).map(result => result.text)).toEqual(["0.33", "1.00", "1234.57", "-1.24", "0.00"]);
+  });
+
+  it("supports zero decimal places and switching back to significant figures", () => {
+    expect(value("12.678", { roundingMode: "decimal", decimalPlaces: 0 }).text).toBe("13");
+    expect(value("12.678", { roundingMode: "significant", decimalPlaces: 2, significantFigures: 3 }).text).toBe("12.7");
   });
 });

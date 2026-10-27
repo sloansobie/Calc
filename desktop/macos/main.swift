@@ -1,4 +1,5 @@
 import Cocoa
+import Carbon
 import Network
 import WebKit
 
@@ -106,6 +107,8 @@ final class AssetServer {
 
 @MainActor
 final class CalculatorDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate {
+    private var hotKey: EventHotKeyRef?
+    private var hotKeyHandler: EventHandlerRef?
     private var window: NSWindow!
     private var webView: WKWebView!
     private var server: AssetServer?
@@ -161,8 +164,8 @@ final class CalculatorDelegate: NSObject, NSApplicationDelegate, WKScriptMessage
             window.setContentSize(NSSize(width: window.contentLayoutRect.width, height: 120))
             UserDefaults.standard.set(true, forKey: "calculator.compactWindow.v2")
         }
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        showCalculator(nil)
+        registerQuickShortcut()
         do {
             guard let root = Bundle.main.resourceURL?.appendingPathComponent("web") else {
                 throw NSError(domain: "Calculator", code: 1, userInfo: [NSLocalizedDescriptionKey:"The bundled calculator is missing."])
@@ -176,6 +179,46 @@ final class CalculatorDelegate: NSObject, NSApplicationDelegate, WKScriptMessage
                 }
             }
         } catch { showError(error) }
+    }
+
+    @objc private func showCalculator(_ sender: Any?) {
+        guard let window else { return }
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        NSApp.unhide(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    private func registerQuickShortcut() {
+        var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard),
+                                      eventKind: UInt32(kEventHotKeyPressed))
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        let handlerStatus = InstallEventHandler(GetApplicationEventTarget(), { _, _, context in
+            guard let context else { return OSStatus(eventNotHandledErr) }
+            let delegate = Unmanaged<CalculatorDelegate>.fromOpaque(context).takeUnretainedValue()
+            MainActor.assumeIsolated { delegate.showCalculator(nil) }
+            return noErr
+        }, 1, &eventType, context, &hotKeyHandler)
+        guard handlerStatus == noErr else {
+            reportShortcutFailure()
+            return
+        }
+        let identifier = EventHotKeyID(signature: OSType(0x43414C43), id: 1)
+        let status = RegisterEventHotKey(UInt32(kVK_ANSI_C), UInt32(cmdKey | optionKey),
+                                        identifier, GetApplicationEventTarget(), 0, &hotKey)
+        if status != noErr { reportShortcutFailure() }
+    }
+
+    private func reportShortcutFailure() {
+        let alert = NSAlert()
+        alert.messageText = "Calc shortcut unavailable"
+        alert.informativeText = "Command–Option–C could not be registered. Another app may already be using this shortcut."
+        alert.beginSheetModal(for: window)
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showCalculator(nil)
+        return true
     }
 
     private func installBridge(_ controller: WKUserContentController) {
@@ -435,6 +478,7 @@ final class CalculatorDelegate: NSObject, NSApplicationDelegate, WKScriptMessage
         item("Select All", #selector(selectExpression(_:)), "a", to:edit)
         append(edit, to:bar)
         let windows = NSMenu(title:"Window")
+        item("Show Calc", #selector(showCalculator(_:)), "c", modifiers:[.command,.option], to:windows)
         windows.addItem(withTitle:"Minimize", action:#selector(NSWindow.performMiniaturize(_:)), keyEquivalent:"m")
         windows.addItem(withTitle:"Zoom", action:#selector(NSWindow.performZoom(_:)), keyEquivalent:"")
         append(windows, to:bar); NSApp.windowsMenu = windows
@@ -456,8 +500,12 @@ final class CalculatorDelegate: NSObject, NSApplicationDelegate, WKScriptMessage
         let alert = NSAlert(); alert.messageText = "Unable to open the calculator"; alert.informativeText = error.localizedDescription
         alert.runModal()
     }
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
-    func applicationWillTerminate(_ notification: Notification) { server?.stop() }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+    func applicationWillTerminate(_ notification: Notification) {
+        if let hotKey { UnregisterEventHotKey(hotKey) }
+        if let hotKeyHandler { RemoveEventHandler(hotKeyHandler) }
+        server?.stop()
+    }
 }
 
 MainActor.assumeIsolated {
